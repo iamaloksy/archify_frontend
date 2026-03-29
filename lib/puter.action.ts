@@ -1,7 +1,23 @@
 const AUTH_STORAGE_KEY = "archify-ai.auth.token";
 const USER_ID_STORAGE_KEY = "archify-ai.user-id";
 const USERNAME_STORAGE_KEY = "archify-ai.username";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const PROD_API_BASE_URL = "https://archify-backend-40tl.onrender.com";
+
+const resolveApiBaseUrl = () => {
+    const configured = import.meta.env.VITE_API_BASE_URL;
+    if (configured) return configured;
+
+    if (typeof window !== "undefined") {
+        const host = window.location.hostname;
+        if (host === "localhost" || host === "127.0.0.1") {
+            return "http://localhost:8080";
+        }
+    }
+
+    return PROD_API_BASE_URL;
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 type ApiUser = {
     id: string;
@@ -112,10 +128,15 @@ const apiRequest = async <T>(
         headers.set("X-User-Id", userId);
     }
 
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-        ...options,
-        headers,
-    });
+    let response: Response;
+    try {
+        response = await fetch(`${API_BASE_URL}${path}`, {
+            ...options,
+            headers,
+        });
+    } catch {
+        throw new Error(`Cannot reach backend at ${API_BASE_URL}`);
+    }
 
     if (!response.ok) {
         if (response.status === 401) {
