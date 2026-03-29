@@ -49,6 +49,20 @@ const loadPuter = async () => {
     return mod.default;
 };
 
+const isUnknownSessionError = (error: unknown) => {
+    if (!error) return false;
+    const message = error instanceof Error ? error.message : String(error);
+    return message.toLowerCase().includes("session id unknown");
+};
+
+const resolvePuterUser = async (puter: any) => {
+    try {
+        return await puter.auth.whoami();
+    } catch {
+        return await puter.auth.getUser();
+    }
+};
+
 const writeAuthToken = (token: string | null) => {
     if (typeof window === "undefined") return;
     if (token) {
@@ -162,13 +176,24 @@ const toThumbnail = async (image: string, maxSize = 280): Promise<string | null>
 export const signIn = async () => {
     try {
         const puter = await loadPuter();
-        await puter.auth.signIn();
-
         let user: { uuid?: string; username?: string } | null = null;
+
         try {
-            user = await puter.auth.whoami();
-        } catch {
-            user = await puter.auth.getUser();
+            await puter.auth.signIn();
+            user = await resolvePuterUser(puter);
+        } catch (error) {
+            if (!isUnknownSessionError(error)) {
+                throw error;
+            }
+
+            try {
+                await puter.auth.signOut();
+            } catch {
+                // Ignore sign-out failures and continue with a fresh sign-in.
+            }
+
+            await puter.auth.signIn();
+            user = await resolvePuterUser(puter);
         }
 
         const puterUuid = user?.uuid;
