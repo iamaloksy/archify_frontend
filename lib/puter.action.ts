@@ -1,6 +1,7 @@
 const AUTH_STORAGE_KEY = "archify-ai.auth.token";
 const USER_ID_STORAGE_KEY = "archify-ai.user-id";
 const USERNAME_STORAGE_KEY = "archify-ai.username";
+const FORCE_INTERACTIVE_SIGNIN_KEY = "archify-ai.force-interactive-signin";
 const PROD_API_BASE_URL = "https://archify-backend-40tl.onrender.com";
 
 const resolveApiBaseUrl = () => {
@@ -197,22 +198,28 @@ const toThumbnail = async (image: string, maxSize = 280): Promise<string | null>
 export const signIn = async () => {
     try {
         const puter = await loadPuter();
+        const forceInteractive =
+            typeof window !== "undefined" &&
+            window.localStorage.getItem(FORCE_INTERACTIVE_SIGNIN_KEY) === "1";
         let user: { uuid?: string; username?: string } | null = null;
 
-        try {
+        if (!forceInteractive) {
+            try {
+                user = await resolvePuterUser(puter);
+            } catch (error) {
+                if (!isUnknownSessionError(error)) {
+                    // Not signed in yet; continue with interactive sign-in below.
+                }
+            }
+        }
+
+        if (!user?.uuid) {
             await puter.auth.signIn();
             user = await resolvePuterUser(puter);
-        } catch (error) {
-            if (!isUnknownSessionError(error)) {
-                throw error;
-            }
+        }
 
-            try {
-                await puter.auth.signOut();
-            } catch {
-                // Ignore sign-out failures and continue with a fresh sign-in.
-            }
-
+        if (!user?.uuid && puter.auth.isSignedIn()) {
+            // Retry once for stale sessions without forcing sign-out, which causes socket churn.
             await puter.auth.signIn();
             user = await resolvePuterUser(puter);
         }
@@ -222,6 +229,10 @@ export const signIn = async () => {
 
         if (!puterUuid) {
             throw new Error("Puter authentication did not return a UUID");
+        }
+
+        if (typeof window !== "undefined") {
+            window.localStorage.removeItem(FORCE_INTERACTIVE_SIGNIN_KEY);
         }
         
         const response = await apiRequest<{ userId: string; username: string; puterUuid: string }>(
@@ -255,9 +266,19 @@ export const signUp = async () => {
 };
 
 export const signOut = async () => {
+    try {
+        const puter = await loadPuter();
+        puter.auth.signOut();
+    } catch (error) {
+        // Keep local logout reliable even if Puter sign-out fails.
+        console.warn("Puter sign-out failed:", error);
+    }
+
     if (typeof window !== "undefined") {
         window.localStorage.removeItem(USER_ID_STORAGE_KEY);
         window.localStorage.removeItem(USERNAME_STORAGE_KEY);
+        window.localStorage.removeItem(AUTH_STORAGE_KEY);
+        window.localStorage.setItem(FORCE_INTERACTIVE_SIGNIN_KEY, "1");
     }
 };
 

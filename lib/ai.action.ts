@@ -19,12 +19,7 @@ const ensurePuterSession = async (puter: any) => {
       throw error;
     }
 
-    try {
-      await puter.auth.signOut();
-    } catch {
-      // Ignore sign-out failures and continue with a fresh sign-in.
-    }
-
+    // Re-authenticate once; avoid forced sign-out because it can trigger noisy socket reconnect loops.
     await puter.auth.signIn();
   }
 };
@@ -73,7 +68,6 @@ export const generate3DView = async ({ sourceImage }: Generate3DViewParams) => {
         throw error;
       }
 
-      await puter.auth.signOut();
       await puter.auth.signIn();
       response = await puter.ai.txt2img(ARCHIFY_AI_RENDER_PROMPT, {
         provider: "gemini",
