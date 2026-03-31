@@ -42,6 +42,7 @@ export default function Home() {
 
             if(!saved) {
                 console.error("Failed to create project");
+                window.alert("Project save failed. Please check backend connection and try again.");
                 return false;
             }
 
@@ -108,10 +109,6 @@ export default function Home() {
                   <a href="#upload" className="cta">
                       Start Building <ArrowRight className="icon" />
                   </a>
-
-                  <Button variant="outline" size="lg" className="demo">
-                      Watch Demo
-                  </Button>
               </div>
 
               <div id="upload" className="upload-shell">

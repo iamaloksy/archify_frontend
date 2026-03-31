@@ -3,6 +3,8 @@ import {ArrowRight, CheckCircle2, ShieldCheck, X} from "lucide-react";
 import {createPortal} from "react-dom";
 import Button from "./ui/Button";
 
+import { FORCE_INTERACTIVE_SIGNIN_KEY } from "../lib/puter.action";
+
 interface AuthModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -50,11 +52,14 @@ const AuthModal = ({ isOpen, onClose, onSignIn }: AuthModalProps) => {
         onClose();
     };
 
-    const handleSignIn = async () => {
+    const handleSignIn = async ({ forceInteractive = false }: { forceInteractive?: boolean } = {}) => {
         setError(null);
 
         try {
             setIsSubmitting(true);
+            if (forceInteractive && typeof window !== "undefined") {
+                window.localStorage.setItem(FORCE_INTERACTIVE_SIGNIN_KEY, "1");
+            }
             const ok = await onSignIn();
 
             if (ok) {
@@ -109,7 +114,18 @@ const AuthModal = ({ isOpen, onClose, onSignIn }: AuthModalProps) => {
                         {error && <p className="auth-error">{error}</p>}
 
                         <Button type="button" onClick={() => void handleSignIn()} className="auth-submit" disabled={isSubmitting}>
-                            {isSubmitting ? "Please wait..." : "Continue with Puter"}
+                            {isSubmitting ? "Please wait..." : "Continue with current Puter account"}
+                            {!isSubmitting && <ArrowRight size={15} />}
+                        </Button>
+
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => void handleSignIn({ forceInteractive: true })}
+                            className="auth-submit"
+                            disabled={isSubmitting}
+                        >
+                            {isSubmitting ? "Please wait..." : "Use a different Puter account"}
                             {!isSubmitting && <ArrowRight size={15} />}
                         </Button>
                     </div>

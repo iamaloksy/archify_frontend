@@ -1,9 +1,17 @@
-import {ARCHIFY_AI_RENDER_PROMPT} from "./constants";
+import { ARCHIFY_AI_RENDER_PROMPT } from "./constants";
 
 const isUnknownSessionError = (error: unknown) => {
   if (!error) return false;
   const message = error instanceof Error ? error.message : String(error);
-  return message.toLowerCase().includes("session id unknown");
+  return message.toLowerCase().includes("session id unknown") || message.toLowerCase().includes("missing or invalid session");
+};
+
+const safePuterSignOut = async (puter: any) => {
+  try {
+    await puter.auth.signOut();
+  } catch {
+    // Ignore sign-out failures and proceed with a fresh sign-in attempt.
+  }
 };
 
 const ensurePuterSession = async (puter: any) => {
@@ -19,7 +27,8 @@ const ensurePuterSession = async (puter: any) => {
       throw error;
     }
 
-    // Re-authenticate once; avoid forced sign-out because it can trigger noisy socket reconnect loops.
+    // Reset stale session state and re-authenticate once.
+    await safePuterSignOut(puter);
     await puter.auth.signIn();
   }
 };
@@ -41,7 +50,7 @@ export const fetchAsDataUrl = async (url: string): Promise<string> => {
   });
 };
 
-export const generate3DView = async ({ sourceImage }: Generate3DViewParams) => {
+export const generate3DView = async ({ sourceImage }: { sourceImage: string, projectId?: string | null }) => {
   const puter = (await import("@heyputer/puter.js")).default;
   await ensurePuterSession(puter);
 
@@ -68,6 +77,7 @@ export const generate3DView = async ({ sourceImage }: Generate3DViewParams) => {
         throw error;
       }
 
+      await safePuterSignOut(puter);
       await puter.auth.signIn();
       response = await puter.ai.txt2img(ARCHIFY_AI_RENDER_PROMPT, {
         provider: "gemini",
@@ -83,7 +93,7 @@ export const generate3DView = async ({ sourceImage }: Generate3DViewParams) => {
     if (!rawImageUrl) return { renderedImage: null, renderedPath: undefined };
 
     const renderedImage = rawImageUrl.startsWith('data:')
-    ? rawImageUrl : await fetchAsDataUrl(rawImageUrl);
+        ? rawImageUrl : await fetchAsDataUrl(rawImageUrl);
 
     return { renderedImage, renderedPath: undefined };
 }

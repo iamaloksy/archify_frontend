@@ -137,6 +137,20 @@ interface CreateProjectParams {
     visibility?: "private" | "public";
 }
 
+interface AiUsageMetric {
+    key: string;
+    count: number;
+    units: number;
+    cost: number;
+}
+
+interface AiUsageSummary {
+    monthlyLimit: number;
+    remaining: number;
+    used: number;
+    usage: AiUsageMetric[];
+}
+
 interface Generate3DViewParams {
     sourceImage: string;
     projectId?: string | null;

@@ -1,75 +1,18 @@
-const AUTH_STORAGE_KEY = "archify-ai.auth.token";
 const USER_ID_STORAGE_KEY = "archify-ai.user-id";
 const USERNAME_STORAGE_KEY = "archify-ai.username";
-const FORCE_INTERACTIVE_SIGNIN_KEY = "archify-ai.force-interactive-signin";
-const PROD_API_BASE_URL = "https://archify-backend-40tl.onrender.com";
+export const FORCE_INTERACTIVE_SIGNIN_KEY = "archify-ai.force-interactive-signin";
 
-const resolveApiBaseUrl = () => {
-    const configured = import.meta.env.VITE_API_BASE_URL;
-    if (configured) return configured;
+const API_BASE_URL = "http://localhost:8080";
 
-    if (typeof window !== "undefined") {
-        const host = window.location.hostname;
-        if (host === "localhost" || host === "127.0.0.1") {
-            return "http://localhost:8080";
-        }
-    }
-
-    return PROD_API_BASE_URL;
-};
-
-const API_BASE_URL = resolveApiBaseUrl();
-
-type ApiUser = {
-    id: string;
-    username: string;
-    email: string;
-};
-
-type AuthResponse = {
-    token: string;
-    user: ApiUser;
-};
-
-type ApiProject = {
-    id: string;
-    name?: string | null;
-    thumbnail?: string | null;
-    sourceImage: string;
-    renderedImage?: string | null;
-    renderedPath?: string | null;
-    ownerId: string;
-    timestamp: number;
-    isPublic: boolean;
-};
-
-type ApiProjectsPage = {
-    items: ApiProject[];
-    page: number;
-    size: number;
-    total: number;
-    hasNext: boolean;
-};
-
-const readAuthToken = () => {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(AUTH_STORAGE_KEY);
-};
-
-const readUserId = () => {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(USER_ID_STORAGE_KEY);
+const clearStoredAuthState = () => {
+    if (typeof window === "undefined") return;
+    window.localStorage.removeItem(USER_ID_STORAGE_KEY);
+    window.localStorage.removeItem(USERNAME_STORAGE_KEY);
 };
 
 const loadPuter = async () => {
     const mod = await import("@heyputer/puter.js");
     return mod.default;
-};
-
-const isUnknownSessionError = (error: unknown) => {
-    if (!error) return false;
-    const message = error instanceof Error ? error.message : String(error);
-    return message.toLowerCase().includes("session id unknown");
 };
 
 const resolvePuterUser = async (puter: any) => {
@@ -80,369 +23,205 @@ const resolvePuterUser = async (puter: any) => {
     }
 };
 
-const writeAuthToken = (token: string | null) => {
-    if (typeof window === "undefined") return;
-    if (token) {
-        window.localStorage.setItem(AUTH_STORAGE_KEY, token);
-        return;
-    }
-    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+const shouldForceInteractiveSignIn = () => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(FORCE_INTERACTIVE_SIGNIN_KEY) === "1";
 };
 
-const mapUser = (user: ApiUser | null) => {
-    if (!user) return null;
-    return {
-        id: user.id,
-        username: user.username,
-    };
-};
-
-const mapProject = (project: ApiProject): DesignItem => ({
-    id: project.id,
-    name: project.name,
-    thumbnail: project.thumbnail,
-    sourceImage: project.sourceImage,
-    renderedImage: project.renderedImage,
-    renderedPath: project.renderedPath,
-    ownerId: project.ownerId,
-    timestamp: project.timestamp,
-    isPublic: project.isPublic,
-});
-
-const apiRequest = async <T>(
-    path: string,
-    options: RequestInit = {},
-    useAuth = true
-): Promise<T> => {
-    const token = readAuthToken();
-    const userId = readUserId();
-    
-    const headers = new Headers(options.headers);
-    headers.set("Content-Type", "application/json");
-
-    if (useAuth && token) {
-        headers.set("Authorization", `Bearer ${token}`);
-    }
-    
-    // Send userId as header for Puter-based auth
-    if (useAuth && userId) {
-        headers.set("X-User-Id", userId);
-    }
-
-    let response: Response;
-    try {
-        response = await fetch(`${API_BASE_URL}${path}`, {
-            ...options,
-            headers,
-        });
-    } catch {
-        throw new Error(`Cannot reach backend at ${API_BASE_URL}`);
-    }
+const synchronizeBackendLogin = async (puterUuid: string, username: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ puterUuid, username })
+    });
 
     if (!response.ok) {
-        if (response.status === 401) {
-            writeAuthToken(null);
-            if (typeof window !== "undefined") {
-                window.localStorage.removeItem(USER_ID_STORAGE_KEY);
-                window.localStorage.removeItem(USERNAME_STORAGE_KEY);
-            }
-        }
-
-        let message = "Request failed";
+        let serverMessage = "";
         try {
-            const payload = await response.json();
-            message = payload?.message || payload?.error || message;
+            const body = await response.json();
+            if (body?.message) {
+                serverMessage = String(body.message);
+            }
         } catch {
-            // Ignore JSON parsing failures and fallback to default message.
+            try {
+                serverMessage = (await response.text()).trim();
+            } catch {
+                serverMessage = "";
+            }
         }
 
-        throw new Error(message);
+        const reason = serverMessage ? `: ${serverMessage}` : "";
+        throw new Error(`Backend login synchronization failed (${response.status})${reason}`);
     }
 
-    if (response.status === 204) {
-        return null as T;
-    }
-
-    return (await response.json()) as T;
-};
-
-const toThumbnail = async (image: string, maxSize = 280): Promise<string | null> => {
-    if (typeof window === "undefined" || !image?.startsWith("data:")) return null;
-
-    return await new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-            const ratio = Math.min(maxSize / img.width, maxSize / img.height, 1);
-            const width = Math.max(1, Math.floor(img.width * ratio));
-            const height = Math.max(1, Math.floor(img.height * ratio));
-
-            const canvas = document.createElement("canvas");
-            canvas.width = width;
-            canvas.height = height;
-
-            const ctx = canvas.getContext("2d");
-            if (!ctx) {
-                resolve(null);
-                return;
-            }
-
-            ctx.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL("image/jpeg", 0.75));
-        };
-
-        img.onerror = () => resolve(null);
-        img.src = image;
-    });
+    return response.json();
 };
 
 export const signIn = async () => {
     try {
         const puter = await loadPuter();
-        const forceInteractive =
-            typeof window !== "undefined" &&
-            window.localStorage.getItem(FORCE_INTERACTIVE_SIGNIN_KEY) === "1";
-        let user: { uuid?: string; username?: string } | null = null;
 
-        if (!forceInteractive) {
+        const forceInteractiveSignIn = shouldForceInteractiveSignIn();
+
+        // If account switching was requested, sign out first to force Puter account chooser.
+        if (forceInteractiveSignIn && puter.auth.isSignedIn()) {
             try {
-                user = await resolvePuterUser(puter);
-            } catch (error) {
-                if (!isUnknownSessionError(error)) {
-                    // Not signed in yet; continue with interactive sign-in below.
-                }
+                await puter.auth.signOut();
+            } catch {
+                // Ignore sign-out failures and still try interactive sign-in.
             }
         }
 
-        if (!user?.uuid) {
+        if (forceInteractiveSignIn || !puter.auth.isSignedIn()) {
             await puter.auth.signIn();
-            user = await resolvePuterUser(puter);
         }
 
-        if (!user?.uuid && puter.auth.isSignedIn()) {
-            // Retry once for stale sessions without forcing sign-out, which causes socket churn.
-            await puter.auth.signIn();
-            user = await resolvePuterUser(puter);
-        }
-
+        const user = await resolvePuterUser(puter);
         const puterUuid = user?.uuid;
         const username = user?.username || "Puter User";
 
         if (!puterUuid) {
-            throw new Error("Puter authentication did not return a UUID");
+            throw new Error("Puter authentication failed to return a UUID");
+        }
+
+        let data: { id: string; username: string };
+        try {
+            data = await synchronizeBackendLogin(puterUuid, username);
+        } catch (syncError) {
+            // Keep Puter login usable even when backend sync is temporarily unavailable.
+            console.warn("Backend login synchronization skipped:", syncError);
+            data = { id: puterUuid, username };
         }
 
         if (typeof window !== "undefined") {
             window.localStorage.removeItem(FORCE_INTERACTIVE_SIGNIN_KEY);
-        }
-        
-        const response = await apiRequest<{ userId: string; username: string; puterUuid: string }>(
-            "/api/auth/puter-signin",
-            {
-                method: "POST",
-                body: JSON.stringify({ 
-                    puterUuid,
-                    username,
-                }),
-            },
-            false
-        );
-
-        if (typeof window !== "undefined") {
-            window.localStorage.setItem(USER_ID_STORAGE_KEY, response.userId);
-            window.localStorage.setItem(USERNAME_STORAGE_KEY, response.username);
+            window.localStorage.setItem(USER_ID_STORAGE_KEY, data.id); // Matches puterUuid
+            window.localStorage.setItem(USERNAME_STORAGE_KEY, data.username);
         }
 
-        return { id: response.userId, username: response.username };
+        return { id: data.id, username: data.username };
     } catch (error) {
-        console.error("Puter sign-in failed:", error);
+        console.error("Sign-in failed:", error);
         throw error;
     }
 };
 
-export const signUp = async () => {
-    // For Puter auth, sign-up is the same as sign-in
-    // The backend auto-creates the user on first sign-in
-    return signIn();
-};
+export const signUp = async () => signIn();
 
 export const signOut = async () => {
     try {
         const puter = await loadPuter();
-        puter.auth.signOut();
-    } catch (error) {
-        // Keep local logout reliable even if Puter sign-out fails.
-        console.warn("Puter sign-out failed:", error);
+        await puter.auth.signOut();
+    } catch {
+        // Ignore SDK failures during sign out
     }
 
     if (typeof window !== "undefined") {
-        window.localStorage.removeItem(USER_ID_STORAGE_KEY);
-        window.localStorage.removeItem(USERNAME_STORAGE_KEY);
-        window.localStorage.removeItem(AUTH_STORAGE_KEY);
+        clearStoredAuthState();
         window.localStorage.setItem(FORCE_INTERACTIVE_SIGNIN_KEY, "1");
     }
 };
 
 export const getCurrentUser = async () => {
     if (typeof window === "undefined") return null;
-    
-    const userId = window.localStorage.getItem(USER_ID_STORAGE_KEY);
-    if (!userId) return null;
-    const username = window.localStorage.getItem(USERNAME_STORAGE_KEY) || "Puter User";
 
-    return { id: userId, username };
+    // To prevent Puter.js from crashing or triggering websocket errors on initial page mount (401/400 errors),
+    // we strictly read from local storage rather than initializing `loadPuter()` universally.
+    const userId = window.localStorage.getItem(USER_ID_STORAGE_KEY);
+    const username = window.localStorage.getItem(USERNAME_STORAGE_KEY);
+    
+    if (!userId) return null;
+
+    return { id: userId, username: username || "User" };
+};
+
+export const getAiUsageSummary = async (): Promise<AiUsageSummary> => {
+    try {
+        const puter = await loadPuter();
+        const monthlyUsage = await puter.auth.getMonthlyUsage();
+
+        const monthlyLimit = Number(monthlyUsage?.allowanceInfo?.monthUsageAllowance ?? 0);
+        const remaining = Number(monthlyUsage?.allowanceInfo?.remaining ?? 0);
+        const used = Math.max(monthlyLimit - remaining, 0);
+
+        const usage = Object.entries(monthlyUsage?.usage ?? {})
+            .map(([key, value]) => {
+                const metric = value as { count?: number; units?: number; cost?: number };
+                return {
+                    key,
+                    count: Number(metric?.count ?? 0),
+                    units: Number(metric?.units ?? 0),
+                    cost: Number(metric?.cost ?? 0),
+                };
+            })
+            .sort((a, b) => b.units - a.units);
+
+        return { monthlyLimit, remaining, used, usage };
+    } catch {
+        return { monthlyLimit: 100, remaining: 100, used: 0, usage: [] };
+    }
+};
+
+const apiRequest = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
+    const userId = typeof window !== "undefined" ? window.localStorage.getItem(USER_ID_STORAGE_KEY) : null;
+    
+    const headers = new Headers(options.headers);
+    headers.set("Content-Type", "application/json");
+    if (userId) {
+        headers.set("x-user-id", userId);
+    }
+
+    const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+    if (!response.ok) throw new Error("Backend request failed");
+    if (response.status === 204) return null as T;
+    return response.json();
 };
 
 export const createProject = async ({ item, visibility = "private" }: CreateProjectParams): Promise<DesignItem | null> => {
-    try {
-        const thumbnail = await toThumbnail(item.sourceImage);
-        const saved = await apiRequest<ApiProject>("/api/projects", {
-            method: "POST",
-            body: JSON.stringify({
-                name: item.name,
-                sourceImage: item.sourceImage,
-                thumbnail,
-                isPublic: visibility === "public",
-            }),
-        });
-
-        return mapProject(saved);
-    } catch (error) {
-        console.error("Failed to save project", error);
-        return null;
-    }
+    return apiRequest<DesignItem>("/api/projects", {
+        method: "POST",
+        body: JSON.stringify({
+            name: item.name,
+            sourceImage: item.sourceImage,
+            thumbnail: item.sourceImage,
+            isPublic: visibility === "public"
+        })
+    }).catch(e => { console.error(e); return null; });
 };
 
-export const updateProjectRender = async ({
-    projectId,
-    renderedImage,
-    renderedPath,
-}: {
-    projectId: string;
-    renderedImage: string;
-    renderedPath?: string;
-}): Promise<DesignItem | null> => {
-    try {
-        const thumbnail = await toThumbnail(renderedImage);
-        const updated = await apiRequest<ApiProject>(`/api/projects/${projectId}/render`, {
-            method: "PATCH",
-            body: JSON.stringify({ renderedImage, renderedPath, thumbnail }),
-        });
-
-        return mapProject(updated);
-    } catch (error) {
-        console.error("Failed to update render", error);
-        return null;
-    }
+export const updateProjectRender = async ({ projectId, renderedImage, renderedPath }: { projectId: string; renderedImage: string; renderedPath?: string; }): Promise<DesignItem | null> => {
+    return apiRequest<DesignItem>(`/api/projects/${projectId}/render`, {
+        method: "PATCH",
+        body: JSON.stringify({ renderedImage, renderedPath, thumbnail: renderedImage })
+    }).catch(e => { console.error(e); return null; });
 };
 
-export const updateProjectName = async ({
-    projectId,
-    name,
-}: {
-    projectId: string;
-    name: string;
-}): Promise<DesignItem | null> => {
-    try {
-        const updated = await apiRequest<ApiProject>(`/api/projects/${projectId}/name`, {
-            method: "PATCH",
-            body: JSON.stringify({ name }),
-        });
-
-        return mapProject(updated);
-    } catch (error) {
-        console.error("Failed to update project name", error);
-        return null;
-    }
+export const updateProjectName = async ({ projectId, name }: { projectId: string; name: string; }): Promise<DesignItem | null> => {
+    return apiRequest<DesignItem>(`/api/projects/${projectId}/name`, {
+        method: "PATCH",
+        body: JSON.stringify({ name })
+    }).catch(e => { console.error(e); return null; });
 };
 
 export const shareProject = async (projectId: string): Promise<DesignItem | null> => {
-    try {
-        const updated = await apiRequest<ApiProject>(`/api/projects/${projectId}/share`, {
-            method: "POST",
-        });
-        return mapProject(updated);
-    } catch (error) {
-        console.error("Failed to share project", error);
-        return null;
-    }
+    return apiRequest<DesignItem>(`/api/projects/${projectId}/share`, { method: "POST" }).catch(() => null);
 };
 
 export const unshareProject = async (projectId: string): Promise<DesignItem | null> => {
-    try {
-        const updated = await apiRequest<ApiProject>(`/api/projects/${projectId}/unshare`, {
-            method: "POST",
-        });
-        return mapProject(updated);
-    } catch (error) {
-        console.error("Failed to unshare project", error);
-        return null;
-    }
+    return apiRequest<DesignItem>(`/api/projects/${projectId}/unshare`, { method: "POST" }).catch(() => null);
 };
 
 export const deleteProject = async (projectId: string): Promise<boolean> => {
-    try {
-        await apiRequest<null>(`/api/projects/${projectId}`, { method: "DELETE" });
-        return true;
-    } catch (error) {
-        console.error("Failed to delete project", error);
-        return false;
-    }
+    return apiRequest<null>(`/api/projects/${projectId}`, { method: "DELETE" }).then(() => true).catch(() => false);
 };
 
-export const getProjects = async ({ page = 0, size = 12, q = "" }: ProjectsQuery = {}): Promise<ProjectsPageResult> => {
-    if (!readUserId()) {
-        return {
-            items: [],
-            page,
-            size,
-            total: 0,
-            hasNext: false,
-        };
+export const getProjects = async ({ page = 0, size = 12, q = "" }: { page?: number; size?: number; q?: string } = {}): Promise<ProjectsPageResult> => {
+    if (typeof window === "undefined" || !window.localStorage.getItem(USER_ID_STORAGE_KEY)) {
+        return { items: [], page: 0, size, total: 0, hasNext: false };
     }
-
-    try {
-        const params = new URLSearchParams();
-        params.set("page", String(page));
-        params.set("size", String(size));
-        if (q.trim()) {
-            params.set("q", q.trim());
-        }
-
-        const projects = await apiRequest<ApiProjectsPage>(`/api/projects?${params.toString()}`, { method: "GET" });
-        return {
-            items: projects.items.map(mapProject),
-            page: projects.page,
-            size: projects.size,
-            total: projects.total,
-            hasNext: projects.hasNext,
-        };
-    } catch (error) {
-        console.error("Failed to get projects", error);
-        return {
-            items: [],
-            page,
-            size,
-            total: 0,
-            hasNext: false,
-        };
-    }
+    return apiRequest<ProjectsPageResult>(`/api/projects?page=${page}&size=${size}&q=${q}`).catch(() => ({ items: [], page: 0, size: 12, total: 0, hasNext: false }));
 };
 
-export const getProjectById = async ({ id }: { id: string }) => {
-    try {
-        if (readUserId()) {
-            const owned = await apiRequest<ApiProject>(`/api/projects/${id}`, { method: "GET" });
-            return mapProject(owned);
-        }
-    } catch {
-        // Fallback to public endpoint.
-    }
-
-    try {
-        const shared = await apiRequest<ApiProject>(`/api/public/projects/${id}`, { method: "GET" }, false);
-        return mapProject(shared);
-    } catch (error) {
-        console.error("Failed to fetch project", error);
-        return null;
-    }
+export const getProjectById = async ({ id }: { id: string }): Promise<DesignItem | null> => {
+    return apiRequest<DesignItem>(`/api/projects/${id}`).catch(() => null);
 };

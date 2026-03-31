@@ -21,6 +21,7 @@ const VisualizerId = () => {
     const [generationError, setGenerationError] = useState<string | null>(null);
     const [editedName, setEditedName] = useState("");
     const [isSavingName, setIsSavingName] = useState(false);
+    const [nameSaveError, setNameSaveError] = useState<string | null>(null);
     const canManage = !!project?.ownerId && !!userId && project.ownerId === userId;
 
     const handleBack = () => navigate('/');
@@ -72,9 +73,16 @@ const VisualizerId = () => {
     const handleSaveName = async (nameOverride?: string) => {
         if (!project?.id || !canManage) return;
 
+        setNameSaveError(null);
         const nextName = (nameOverride ?? editedName).trim();
-        if (!nextName) return;
-        if ((project.name || "").trim() === nextName) return;
+        if (!nextName) {
+            setEditedName(project.name || "");
+            return;
+        }
+        if ((project.name || "").trim() === nextName) {
+            setEditedName(project.name || "");
+            return;
+        }
 
         try {
             setIsSavingName(true);
@@ -86,7 +94,14 @@ const VisualizerId = () => {
             if (updated) {
                 setProject(updated);
                 setEditedName(updated.name || "");
+                return;
             }
+
+            setNameSaveError("Name save failed. Please try again.");
+            setEditedName(project.name || "");
+        } catch {
+            setNameSaveError("Name save failed. Please try again.");
+            setEditedName(project.name || "");
         } finally {
             setIsSavingName(false);
         }
@@ -206,6 +221,11 @@ const VisualizerId = () => {
                                         placeholder={`Residence ${id}`}
                                         maxLength={120}
                                     />
+                                    {nameSaveError && (
+                                        <p className="note" role="alert" style={{ color: "#dc2626" }}>
+                                            {nameSaveError}
+                                        </p>
+                                    )}
                                 </div>
                             ) : (
                                 <h2>{project?.name || `Residence ${id}`}</h2>
