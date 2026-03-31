@@ -2,7 +2,13 @@ const USER_ID_STORAGE_KEY = "archify-ai.user-id";
 const USERNAME_STORAGE_KEY = "archify-ai.username";
 export const FORCE_INTERACTIVE_SIGNIN_KEY = "archify-ai.force-interactive-signin";
 
-const API_BASE_URL = "http://localhost:8080";
+const resolveApiBaseUrl = () => {
+    const configured = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+    if (!configured) return "";
+    return configured.replace(/\/+$/, "");
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 const clearStoredAuthState = () => {
     if (typeof window === "undefined") return;
