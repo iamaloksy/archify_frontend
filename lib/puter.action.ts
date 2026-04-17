@@ -222,10 +222,7 @@ export const deleteProject = async (projectId: string): Promise<boolean> => {
 };
 
 export const getProjects = async ({ page = 0, size = 12, q = "" }: { page?: number; size?: number; q?: string } = {}): Promise<ProjectsPageResult> => {
-    if (typeof window === "undefined" || !window.localStorage.getItem(USER_ID_STORAGE_KEY)) {
-        return { items: [], page: 0, size, total: 0, hasNext: false };
-    }
-    return apiRequest<ProjectsPageResult>(`/api/projects?page=${page}&size=${size}&q=${q}`).catch(() => ({ items: [], page: 0, size: 12, total: 0, hasNext: false }));
+    return apiRequest<ProjectsPageResult>(`/api/projects?page=${page}&size=${size}&q=${encodeURIComponent(q)}`);
 };
 
 export const getProjectById = async ({ id }: { id: string }): Promise<DesignItem | null> => {

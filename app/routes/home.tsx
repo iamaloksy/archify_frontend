@@ -23,6 +23,18 @@ export default function Home() {
     const [hasNext, setHasNext] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const isCreatingProjectRef = useRef(false);
+    const activeFetchRef = useRef(0);
+
+    const sortProjects = (items: DesignItem[]) => {
+        const seen = new Map<string, DesignItem>();
+
+        for (const item of items) {
+            if (!item?.id) continue;
+            seen.set(item.id, item);
+        }
+
+        return Array.from(seen.values()).sort((left, right) => (right.timestamp || 0) - (left.timestamp || 0));
+    };
 
     const handleUploadComplete = async (base64Image: string) => {
         try {
@@ -46,7 +58,7 @@ export default function Home() {
                 return false;
             }
 
-            setProjects((prev) => [saved, ...prev]);
+            setProjects((prev) => sortProjects([saved, ...prev]));
 
             navigate(`/visualizer/${saved.id}`, {
                 state: {
@@ -63,22 +75,27 @@ export default function Home() {
     }
 
     const fetchProjects = async (nextPage: number, append: boolean) => {
+        const fetchId = ++activeFetchRef.current;
         setIsLoading(true);
-        const result = await getProjects({ page: nextPage, size: 12, q: query });
 
-        setHasNext(result.hasNext);
-        setPage(result.page);
-        setProjects((prev) => append ? [...prev, ...result.items] : result.items);
-        setIsLoading(false);
+        try {
+            const result = await getProjects({ page: nextPage, size: 12, q: query });
+
+            if (fetchId !== activeFetchRef.current) return;
+
+            setHasNext(result.hasNext);
+            setPage(result.page);
+            setProjects((prev) => sortProjects(append ? [...prev, ...result.items] : result.items));
+        } catch (error) {
+            console.error("Failed to load projects:", error);
+        } finally {
+            if (fetchId === activeFetchRef.current) {
+                setIsLoading(false);
+            }
+        }
     };
 
     useEffect(() => {
-        if (!isSignedIn) {
-            setProjects([]);
-            setHasNext(false);
-            return;
-        }
-
         const timer = setTimeout(() => {
             void fetchProjects(0, false);
         }, 250);

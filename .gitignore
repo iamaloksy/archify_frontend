@@ -10,8 +10,7 @@
 # Frontend build outputs
 /dist/
 
-# Backend build outputs
-/backend/target/
+
 
 # IDE/editor/project-local files
 /.idea/
